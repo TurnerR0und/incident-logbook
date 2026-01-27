@@ -1,0 +1,20 @@
+# Python junk
+__pycache__/
+*.py[cod]
+*.so
+
+# Environment / Virtual Envs
+.env
+.venv
+env/
+venv/
+incident-logbook-env/
+
+# Database
+*.sqlite
+
+# VS Code settings (optional, but good to ignore personal settings)
+.vscode/
+
+# Docker
+.pytest_cache/
