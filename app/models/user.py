@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.database import Base
@@ -37,3 +37,4 @@ class User(Base):
 
     # We'll add relationships (like 'incidents') later. 
     # For now, keep the model isolated to test the migration system.
+    incidents = relationship("Incident", back_populates="owner")
