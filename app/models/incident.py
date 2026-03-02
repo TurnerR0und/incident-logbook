@@ -7,11 +7,11 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 class IncidentStatus(str, enum.Enum):
-        "OPEN"
-        "INVESTIGATING"
-        "MITIGATED"
-        "RESOLVED"
-        "CLOSED"
+    OPEN = "OPEN"
+    INVESTIGATING = "INVESTIGATING"
+    MITIGATED = "MITIGATED"
+    RESOLVED = "RESOLVED"
+    CLOSED = "CLOSED"
 class IncidentSeverity(str, enum.Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
