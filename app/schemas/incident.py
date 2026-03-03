@@ -19,6 +19,7 @@ class IncidentResponse(IncidentBase):
     id: uuid.UUID
     status: IncidentStatus
     created_at: datetime
+    updated_at: datetime
     owner_id: uuid.UUID
 
     # This allows Pydantic to read data directly from the SQLAlchemy object
