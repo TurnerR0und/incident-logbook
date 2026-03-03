@@ -23,3 +23,11 @@ class IncidentResponse(IncidentBase):
 
     # This allows Pydantic to read data directly from the SQLAlchemy object
     model_config = ConfigDict(from_attributes=True)
+
+# 4. Update Schema (Input)
+# All fields are optional (None) because you might only want to change the status.
+class IncidentUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    status: IncidentStatus | None = None
+    severity: IncidentSeverity | None = None
