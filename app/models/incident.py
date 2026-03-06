@@ -5,6 +5,7 @@ from sqlalchemy import String, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.incident_comment import IncidentComment
 
 class IncidentStatus(str, enum.Enum):
     OPEN = "OPEN"
@@ -42,11 +43,21 @@ class Incident(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now()
     )
+    root_cause: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # 3. The Relationship
     # We store the ID of the user who owns this incident
@@ -54,4 +65,9 @@ class Incident(Base):
     
     # This helps SQLAlchemy know how to fetch the User object from an Incident
     # We will add the other side of this ("incidents = ...") to the User model next.
-    owner = relationship("User", back_populates="incidents")    
+    owner = relationship("User", back_populates="incidents")
+    comments = relationship(
+        "IncidentComment",
+        back_populates="incident",
+        cascade="all, delete-orphan"
+    )

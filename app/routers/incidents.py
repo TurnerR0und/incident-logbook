@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
+
 from app.database import get_db
 from app.models.incident import Incident, IncidentSeverity, IncidentStatus
 from app.models.user import User
@@ -20,12 +21,18 @@ async def create_incident(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    new_incident = Incident(
-        title=incident_data.title,
-        description=incident_data.description,
-        severity=incident_data.severity,
-        owner_id=current_user.id,
-    )
+    new_incident_data = {
+        "title": incident_data.title,
+        "description": incident_data.description,
+        "severity": incident_data.severity,
+        "owner_id": current_user.id,
+    }
+    if incident_data.started_at is not None:
+        new_incident_data["started_at"] = incident_data.started_at
+    if incident_data.root_cause is not None:
+        new_incident_data["root_cause"] = incident_data.root_cause
+
+    new_incident = Incident(**new_incident_data)
     db.add(new_incident)
     await db.commit()
     await db.refresh(new_incident)
@@ -79,7 +86,12 @@ async def update_incident(
     # 2. Apply Updates
     # exclude_unset=True means: "If the user didn't send 'title', don't set title to None"
     update_data = incident_update.model_dump(exclude_unset=True)
-    
+    if (
+        update_data.get("status") == IncidentStatus.RESOLVED
+        and incident.status != IncidentStatus.RESOLVED
+    ):
+        update_data["resolved_at"] = datetime.now(timezone.utc)
+
     for key, value in update_data.items():
         setattr(incident, key, value)
 

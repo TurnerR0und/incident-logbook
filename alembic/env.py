@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.database import Base, DATABASE_URL
 from app.models.user import User  # This registers the model so Alembic sees it
 from app.models.incident import Incident
+from app.models.incident_comment import IncidentComment
 from alembic import context
 
 

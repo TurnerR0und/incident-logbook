@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.incident_comment import IncidentComment
 
 class User(Base):
     __tablename__ = "users"
@@ -38,3 +39,4 @@ class User(Base):
     # We'll add relationships (like 'incidents') later. 
     # For now, keep the model isolated to test the migration system.
     incidents = relationship("Incident", back_populates="owner")
+    incident_comments = relationship("IncidentComment", back_populates="author")

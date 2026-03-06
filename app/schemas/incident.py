@@ -12,14 +12,18 @@ class IncidentBase(BaseModel):
 # 2. Create Schema (Input)
 # We don't ask for status (default OPEN) or owner_id (we get that from the token)
 class IncidentCreate(IncidentBase):
-    pass 
+    started_at: datetime | None = None
+    root_cause: str | None = None
 
 # 3. Response Schema (Output)
 class IncidentResponse(IncidentBase):
     id: uuid.UUID
     status: IncidentStatus
     created_at: datetime
+    started_at: datetime | None
+    resolved_at: datetime | None
     updated_at: datetime
+    root_cause: str | None
     owner_id: uuid.UUID
 
     # This allows Pydantic to read data directly from the SQLAlchemy object
@@ -32,3 +36,5 @@ class IncidentUpdate(BaseModel):
     description: str | None = None
     status: IncidentStatus | None = None
     severity: IncidentSeverity | None = None
+    started_at: datetime | None = None
+    root_cause: str | None = None
