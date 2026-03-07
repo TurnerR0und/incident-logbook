@@ -44,17 +44,47 @@ async def create_incident(
 async def list_incidents(
     status: Optional[IncidentStatus] = Query(default=None),
     severity: Optional[IncidentSeverity] = Query(default=None),
+    skip: int = Query(default=0, ge=0, description="Number of records to skip"),
+    limit: int = Query(default=100, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Incident).where(Incident.owner_id == current_user.id)
+    query = select(Incident)
+    if not current_user.is_admin:
+        query = query.where(Incident.owner_id == current_user.id)
+    
     if status is not None:
         query = query.where(Incident.status == status)
     if severity is not None:
         query = query.where(Incident.severity == severity)
+        
     query = query.order_by(Incident.created_at.desc())
+    
+    # Apply pagination here!
+    query = query.offset(skip).limit(limit)
+    
     result = await db.execute(query)
     return result.scalars().all()
+
+@router.get("/{incident_id}", response_model=IncidentResponse)
+async def get_incident(
+    incident_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Fetch the Incident
+    query = select(Incident).where(Incident.id == incident_id)
+    result = await db.execute(query)
+    incident = result.scalars().first()
+
+    # 2. Gate 1: Does it exist?
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    if not current_user.is_admin and incident.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this incident")
+
+    return incident
 
 @router.patch("/{incident_id}", response_model=IncidentResponse)
 async def update_incident(
@@ -70,7 +100,7 @@ async def update_incident(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    if incident.owner_id != current_user.id:
+    if not current_user.is_admin and incident.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to update this incident")
 
     if incident.status == IncidentStatus.CLOSED:

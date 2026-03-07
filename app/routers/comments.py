@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ async def get_accessible_incident(
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    if incident.owner_id != current_user.id:
+    if not current_user.is_admin and incident.owner_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="Not authorized to access this incident",
@@ -57,14 +57,20 @@ async def create_comment(
 @router.get("/{incident_id}/comments", response_model=list[CommentResponse])
 async def list_comments(
     incident_id: uuid.UUID,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     incident = await get_accessible_incident(incident_id, current_user, db)
 
-    result = await db.execute(
+    query = (
         select(IncidentComment)
         .where(IncidentComment.incident_id == incident.id)
         .order_by(IncidentComment.created_at.asc())
+        .offset(skip)
+        .limit(limit)
     )
+    
+    result = await db.execute(query)
     return result.scalars().all()

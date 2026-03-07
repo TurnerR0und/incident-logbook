@@ -18,6 +18,7 @@ class UserCreate(UserBase):
 # NOTICE: We do NOT include the password or the hash here!
 class UserResponse(UserBase):
     id: uuid.UUID
+    is_admin: bool
     created_at: datetime
 
     # This config tells Pydantic: "It's okay to read data from a pure Python class (ORM model)"
