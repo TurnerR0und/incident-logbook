@@ -44,11 +44,29 @@ async def create_incident(
 async def list_incidents(
     status: Optional[IncidentStatus] = Query(default=None),
     severity: Optional[IncidentSeverity] = Query(default=None),
+    created_after: Optional[datetime] = Query(
+        default=None,
+        description="Only include incidents created at or after this ISO-8601 timestamp",
+    ),
+    created_before: Optional[datetime] = Query(
+        default=None,
+        description="Only include incidents created at or before this ISO-8601 timestamp",
+    ),
     skip: int = Query(default=0, ge=0, description="Number of records to skip"),
     limit: int = Query(default=100, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if (
+        created_after is not None
+        and created_before is not None
+        and created_after > created_before
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="created_after must be earlier than or equal to created_before",
+        )
+
     query = select(Incident)
     if not current_user.is_admin:
         query = query.where(Incident.owner_id == current_user.id)
@@ -57,6 +75,10 @@ async def list_incidents(
         query = query.where(Incident.status == status)
     if severity is not None:
         query = query.where(Incident.severity == severity)
+    if created_after is not None:
+        query = query.where(Incident.created_at >= created_after)
+    if created_before is not None:
+        query = query.where(Incident.created_at <= created_before)
         
     query = query.order_by(Incident.created_at.desc())
     
