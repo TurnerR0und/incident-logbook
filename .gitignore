@@ -18,3 +18,4 @@ incident-logbook-env/
 
 # Docker
 .pytest_cache/
+node_modules
