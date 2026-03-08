@@ -366,8 +366,15 @@ export default function Dashboard() {
                           {incident.severity}
                         </span>
                       </td>
-                      <td className="px-3 py-4 align-top text-sm text-slate-500">
-                        {format(new Date(incident.created_at), 'MMM dd, yyyy')}
+                      <td className="px-3 py-4 align-top">
+                        <div className="flex flex-col">
+                          <span className="text-sm text-slate-700">
+                            {format(new Date(incident.created_at), 'MMM dd, yyyy')}
+                          </span>
+                          <span className="text-xs text-slate-400 mt-0.5">
+                            {format(new Date(incident.created_at), 'HH:mm')}
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   ))}

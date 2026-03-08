@@ -3,9 +3,9 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, case
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.orm import joinedload
 from app.database import get_db
 from app.models.incident_comment import IncidentComment
 from app.models.incident import Incident, IncidentSeverity, IncidentStatus
@@ -132,9 +132,18 @@ async def list_incidents(
     if created_before is not None:
         query = query.where(Incident.created_at <= created_before)
         
-    query = query.order_by(Incident.created_at.desc())
+    if severity is not None:
+        query = query.where(Incident.severity == severity)
+        
+    # NEW: Sort CLOSED to the bottom (1), active to the top (0), then by date
+    query = query.order_by(
+        case(
+            (Incident.status == IncidentStatus.CLOSED, 1),
+            else_=0
+        ),
+        Incident.created_at.desc()
+    )
     
-    # Apply pagination here!
     query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
