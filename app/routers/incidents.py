@@ -3,7 +3,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -14,6 +14,42 @@ from app.routers.auth import get_current_user
 from app.schemas.incident import IncidentCreate, IncidentResponse, IncidentUpdate
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
+
+
+def serialize_incident(incident: Incident, owner_email: str) -> IncidentResponse:
+    return IncidentResponse.model_validate(
+        {
+            "id": incident.id,
+            "title": incident.title,
+            "description": incident.description,
+            "status": incident.status,
+            "severity": incident.severity,
+            "created_at": incident.created_at,
+            "started_at": incident.started_at,
+            "resolved_at": incident.resolved_at,
+            "updated_at": incident.updated_at,
+            "root_cause": incident.root_cause,
+            "owner_id": incident.owner_id,
+            "owner_email": owner_email,
+        }
+    )
+
+
+async def fetch_incident_with_owner(
+    db: AsyncSession,
+    incident_id: uuid.UUID,
+) -> tuple[Incident, str] | None:
+    result = await db.execute(
+        select(Incident, User.email)
+        .join(User, Incident.owner_id == User.id)
+        .where(Incident.id == incident_id)
+    )
+    row = result.first()
+    if row is None:
+        return None
+
+    incident, owner_email = row
+    return incident, owner_email
 
 
 @router.post("", response_model=IncidentResponse)
@@ -36,14 +72,22 @@ async def create_incident(
     new_incident = Incident(**new_incident_data)
     db.add(new_incident)
     await db.commit()
-    await db.refresh(new_incident)
-    return new_incident
+    incident_with_owner = await fetch_incident_with_owner(db, new_incident.id)
+    if incident_with_owner is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident, owner_email = incident_with_owner
+    return serialize_incident(incident, owner_email)
 
 
 @router.get("", response_model=list[IncidentResponse])
 async def list_incidents(
     status: Optional[IncidentStatus] = Query(default=None),
     severity: Optional[IncidentSeverity] = Query(default=None),
+    owner_email: Optional[str] = Query(
+        default=None,
+        description="Admin-only case-insensitive search across incident owner emails",
+    ),
     created_after: Optional[datetime] = Query(
         default=None,
         description="Only include incidents created at or after this ISO-8601 timestamp",
@@ -67,7 +111,13 @@ async def list_incidents(
             detail="created_after must be earlier than or equal to created_before",
         )
 
-    query = select(Incident)
+    if owner_email is not None and not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can filter incidents by user",
+        )
+
+    query = select(Incident, User.email).join(User, Incident.owner_id == User.id)
     if not current_user.is_admin:
         query = query.where(Incident.owner_id == current_user.id)
     
@@ -75,6 +125,8 @@ async def list_incidents(
         query = query.where(Incident.status == status)
     if severity is not None:
         query = query.where(Incident.severity == severity)
+    if owner_email is not None:
+        query = query.where(func.lower(User.email).like(f"%{owner_email.lower()}%"))
     if created_after is not None:
         query = query.where(Incident.created_at >= created_after)
     if created_before is not None:
@@ -86,7 +138,10 @@ async def list_incidents(
     query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
-    return result.scalars().all()
+    return [
+        serialize_incident(incident, owner_email)
+        for incident, owner_email in result.all()
+    ]
 
 @router.get("/{incident_id}", response_model=IncidentResponse)
 async def get_incident(
@@ -94,19 +149,16 @@ async def get_incident(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # 1. Fetch the Incident
-    query = select(Incident).where(Incident.id == incident_id)
-    result = await db.execute(query)
-    incident = result.scalars().first()
-
-    # 2. Gate 1: Does it exist?
-    if not incident:
+    incident_with_owner = await fetch_incident_with_owner(db, incident_id)
+    if incident_with_owner is None:
         raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident, owner_email = incident_with_owner
 
     if not current_user.is_admin and incident.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this incident")
 
-    return incident
+    return serialize_incident(incident, owner_email)
 
 @router.patch("/{incident_id}", response_model=IncidentResponse)
 async def update_incident(
@@ -115,12 +167,11 @@ async def update_incident(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    query = select(Incident).where(Incident.id == incident_id)
-    result = await db.execute(query)
-    incident = result.scalars().first()
-
-    if not incident:
+    incident_with_owner = await fetch_incident_with_owner(db, incident_id)
+    if incident_with_owner is None:
         raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident, _ = incident_with_owner
 
     if not current_user.is_admin and incident.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to update this incident")
@@ -173,6 +224,9 @@ async def update_incident(
         db.add_all(system_comments)
 
     await db.commit()
-    await db.refresh(incident)
+    refreshed_incident_with_owner = await fetch_incident_with_owner(db, incident.id)
+    if refreshed_incident_with_owner is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
 
-    return incident
+    refreshed_incident, owner_email = refreshed_incident_with_owner
+    return serialize_incident(refreshed_incident, owner_email)

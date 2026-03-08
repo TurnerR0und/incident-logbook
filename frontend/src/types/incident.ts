@@ -23,6 +23,7 @@ export interface Incident {
   updated_at: string;
   root_cause: string | null;
   owner_id: string;
+  owner_email: string;
 }
 
 // What we send to the API when creating

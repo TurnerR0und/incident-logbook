@@ -67,6 +67,7 @@ async def login(
     token = create_access_token({"sub": user.email})
     return {"access_token": token, "token_type": "bearer"}
 
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme), 
     db: AsyncSession = Depends(get_db)
@@ -80,7 +81,7 @@ async def get_current_user(
     try:
         # 1. Decode the token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
+        email = payload.get("sub")
         if email is None:
             raise credentials_exception
     except JWTError:
@@ -95,3 +96,8 @@ async def get_current_user(
         raise credentials_exception
         
     return user
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user

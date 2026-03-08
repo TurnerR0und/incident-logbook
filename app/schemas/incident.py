@@ -25,6 +25,7 @@ class IncidentResponse(IncidentBase):
     updated_at: datetime
     root_cause: str | None
     owner_id: uuid.UUID
+    owner_email: str
 
     # This allows Pydantic to read data directly from the SQLAlchemy object
     model_config = ConfigDict(from_attributes=True)

@@ -22,6 +22,7 @@ async def test_create_incident(client, auth_headers):
     assert payload["status"] == "OPEN"
     assert payload["severity"] == "HIGH"
     assert payload["resolved_at"] is None
+    assert payload["owner_email"] == "creator@example.com"
 
 
 async def test_update_to_resolved_sets_resolved_at(client, auth_headers):
@@ -116,3 +117,45 @@ async def test_created_after_filters_incidents_by_timeframe(
     returned_ids = {item["id"] for item in payload}
     assert str(new_incident.id) in returned_ids
     assert str(old_incident.id) not in returned_ids
+
+
+async def test_admin_can_filter_incidents_by_owner_email(
+    client,
+    auth_headers,
+    create_user,
+    create_incident,
+):
+    admin_headers = await auth_headers("admin-filter@example.com", is_admin=True)
+    matching_owner = await create_user("alice@example.com")
+    other_owner = await create_user("bob@example.com")
+
+    alice_incident = await create_incident(matching_owner.id, title="Alice issue")
+    await create_incident(other_owner.id, title="Bob issue")
+
+    response = await client.get(
+        "/incidents",
+        params={"owner_email": "ali"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    returned_ids = {item["id"] for item in payload}
+    assert str(alice_incident.id) in returned_ids
+    assert all(item["owner_email"] == "alice@example.com" for item in payload)
+
+
+async def test_standard_user_cannot_filter_incidents_by_owner_email(
+    client,
+    auth_headers,
+):
+    headers = await auth_headers("standard-filter@example.com")
+
+    response = await client.get(
+        "/incidents",
+        params={"owner_email": "someone"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Only admins can filter incidents by user"
