@@ -34,8 +34,6 @@ const SEVERITY_OPTIONS: IncidentSeverity[] = [
   'LOW',
 ];
 
-const PAGE_SIZE = 100;
-
 function getSeverityColor(severity: IncidentSeverity) {
   switch (severity) {
     case 'CRITICAL':
@@ -73,13 +71,15 @@ export default function Dashboard() {
   const { user: currentUser, logout } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | ''>('');
   const [severityFilter, setSeverityFilter] = useState<IncidentSeverity | ''>('');
   const [createdAfter, setCreatedAfter] = useState('');
   const [createdBefore, setCreatedBefore] = useState('');
   const [ownerSearch, setOwnerSearch] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(25);
   const [copiedIncidentId, setCopiedIncidentId] = useState<string | null>(null);
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
   const isAdmin = currentUser?.is_admin ?? false;
@@ -97,14 +97,24 @@ export default function Dashboard() {
     isAdmin ? 'admin' : 'user',
   ].join('|');
   const previousFilterKeyRef = useRef(filterKey);
+  const hasLoadedOnceRef = useRef(false);
+  const requestSequenceRef = useRef(0);
 
   const fetchIncidents = useCallback(async () => {
     if (hasInvalidDateRange) {
       setIsLoading(false);
+      setIsRefreshing(false);
       return;
     }
 
-    setIsLoading(true);
+    const requestId = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestId;
+
+    if (!hasLoadedOnceRef.current) {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
 
     try {
       const params: ListIncidentParams = {};
@@ -124,23 +134,37 @@ export default function Dashboard() {
       if (createdBefore) {
         params.created_before = `${createdBefore}T23:59:59.999Z`;
       }
-      params.skip = (currentPage - 1) * PAGE_SIZE;
-      params.limit = PAGE_SIZE;
+      params.skip = page * pageSize;
+      params.limit = pageSize;
 
       const data = await incidentApi.list(params);
+
+      if (requestId !== requestSequenceRef.current) {
+        return;
+      }
+
+      hasLoadedOnceRef.current = true;
       setIncidents(data);
     } catch (error) {
+      if (requestId !== requestSequenceRef.current) {
+        return;
+      }
+
       console.error('Failed to load incidents:', error);
     } finally {
-      setIsLoading(false);
+      if (requestId === requestSequenceRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
   }, [
     createdAfter,
     createdBefore,
-    currentPage,
     deferredOwnerSearch,
     hasInvalidDateRange,
     isAdmin,
+    page,
+    pageSize,
     severityFilter,
     statusFilter,
   ]);
@@ -151,14 +175,14 @@ export default function Dashboard() {
     if (filtersChanged) {
       previousFilterKeyRef.current = filterKey;
 
-      if (currentPage !== 1) {
-        setCurrentPage(1);
+      if (page !== 0) {
+        setPage(0);
         return;
       }
     }
 
     fetchIncidents();
-  }, [currentPage, fetchIncidents, filterKey]);
+  }, [fetchIncidents, filterKey, page]);
 
   const handleLogout = () => {
     logout();
@@ -171,8 +195,12 @@ export default function Dashboard() {
     setCreatedAfter('');
     setCreatedBefore('');
     setOwnerSearch('');
-    setCurrentPage(1);
+    setPage(0);
   };
+
+  const canGoToPreviousPage = page > 0 && !isRefreshing && !hasInvalidDateRange;
+  const canGoToNextPage =
+    incidents.length === pageSize && !isRefreshing && !hasInvalidDateRange;
 
   const handleCopyIncidentId = async (
     event: React.MouseEvent<HTMLButtonElement>,
@@ -347,11 +375,18 @@ export default function Dashboard() {
           </div>
 
           <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className={`text-sm ${hasInvalidDateRange ? 'text-red-600' : 'text-slate-500'}`}>
-              {hasInvalidDateRange
-                ? 'Created after must be on or before created before.'
-                : 'Filters combine across status, severity, owner, and created date.'}
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className={`text-sm ${hasInvalidDateRange ? 'text-red-600' : 'text-slate-500'}`}>
+                {hasInvalidDateRange
+                  ? 'Created after must be on or before created before.'
+                  : 'Filters combine across status, severity, owner, and created date.'}
+              </p>
+              {isRefreshing && !isLoading && (
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                  Refreshing incidents...
+                </p>
+              )}
+            </div>
 
             <button
               type="button"
@@ -472,6 +507,37 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && (
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              Page {page + 1}
+              <span className="ml-2 text-slate-400">Up to {pageSize} incidents per page</span>
+            </p>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPage((currentPage) => currentPage - 1)}
+                disabled={!canGoToPreviousPage}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+                {page + 1}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPage((currentPage) => currentPage + 1)}
+                disabled={!canGoToNextPage}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
             </div>
           </div>
         )}
