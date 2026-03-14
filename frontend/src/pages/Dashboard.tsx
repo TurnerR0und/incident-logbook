@@ -12,12 +12,11 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-import { authApi } from '../api/auth';
 import { incidentApi } from '../api/incidents';
 import type { ListIncidentParams } from '../api/incidents';
 import CreateIncidentModal from '../components/CreateIncidentModal';
+import { useAuth } from '../context/AuthContext';
 import type { Incident, IncidentSeverity, IncidentStatus } from '../types/incident';
-import type { User } from '../types/user';
 
 const STATUS_OPTIONS: IncidentStatus[] = [
   'OPEN',
@@ -68,7 +67,7 @@ function truncateIncidentId(incidentId: string) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { user: currentUser, logout } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -78,11 +77,6 @@ export default function Dashboard() {
   const [copiedIncidentId, setCopiedIncidentId] = useState<string | null>(null);
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
   const isAdmin = currentUser?.is_admin ?? false;
-
-  const fetchCurrentUser = useCallback(async () => {
-    const user = await authApi.me();
-    setCurrentUser(user);
-  }, []);
 
   const fetchIncidents = useCallback(async () => {
     setIsLoading(true);
@@ -110,18 +104,12 @@ export default function Dashboard() {
   }, [deferredOwnerSearch, isAdmin, severityFilter, statusFilter]);
 
   useEffect(() => {
-    fetchCurrentUser().catch((error) => {
-      console.error('Failed to load current user:', error);
-    });
-  }, [fetchCurrentUser]);
-
-  useEffect(() => {
     fetchIncidents();
   }, [fetchIncidents]);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/login');
+    logout();
+    navigate('/login', { replace: true });
   };
 
   const handleCopyIncidentId = async (

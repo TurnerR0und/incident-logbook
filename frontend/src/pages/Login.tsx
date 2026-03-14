@@ -1,7 +1,20 @@
+import axios from 'axios';
 import { useState } from 'react';
-import { authApi } from '../api/auth';
 import { AlertCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  if (axios.isAxiosError<{ detail?: string }>(error)) {
+    return error.response?.data?.detail ?? fallbackMessage;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallbackMessage;
+}
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -9,6 +22,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,11 +30,10 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const data = await authApi.login(email, password);
-      localStorage.setItem('token', data.access_token);
+      await login(email, password);
       navigate('/dashboard', { replace: true });
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'An error occurred during login');
+    } catch (error) {
+      setError(getErrorMessage(error, 'An error occurred during login'));
     } finally {
       setIsLoading(false);
     }

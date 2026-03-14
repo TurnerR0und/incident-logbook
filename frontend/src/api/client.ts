@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearAuthSession, getAuthToken } from '../context/authSession';
 
 const AUTH_PATHS = new Set(['/auth/login', '/auth/register']);
 
@@ -25,7 +26,7 @@ export const apiClient = axios.create({
 
 // Attach the saved access token to every API request after login.
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = getAuthToken();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -44,7 +45,7 @@ apiClient.interceptors.response.use(
     const isAuthRequest = AUTH_PATHS.has(requestPath);
 
     if (error.response?.status === 401 && !isAuthRequest) {
-      localStorage.removeItem('token');
+      clearAuthSession();
 
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';

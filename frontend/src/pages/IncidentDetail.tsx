@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { authApi } from '../api/auth';
 import { incidentApi } from '../api/incidents';
 import { commentApi } from '../api/comments';
-import type { Incident } from '../types/incident';
+import { useAuth } from '../context/AuthContext';
+import type { Incident, IncidentSeverity, IncidentStatus } from '../types/incident';
 import type { Comment } from '../types/comment';
-import type { User } from '../types/user';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
@@ -23,8 +22,8 @@ import {
 export default function IncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [incident, setIncident] = useState<Incident | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -45,13 +44,11 @@ export default function IncidentDetail() {
     if (!id) return;
 
     try {
-      const [userData, incidentData, commentsData] = await Promise.all([
-        authApi.me(),
+      const [incidentData, commentsData] = await Promise.all([
         incidentApi.get(id),
         commentApi.list(id),
       ]);
 
-      setCurrentUser(userData);
       setIncident(incidentData);
       setComments(commentsData);
     } catch (error) {
@@ -71,9 +68,12 @@ export default function IncidentDetail() {
     commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [comments]);
 
-  const handleUpdateIncident = async (field: 'status' | 'severity', value: string) => {
+  const handleUpdateIncident = async <TField extends 'status' | 'severity'>(
+    field: TField,
+    value: Incident[TField],
+  ) => {
     if (!id || !incident) return;
-    if ((incident as any)[field] === value) return; // Skip if unchanged
+    if (incident[field] === value) return;
 
     if (field === 'status' && value === 'CLOSED') {
       setIsClosingMode(true);
@@ -272,7 +272,9 @@ export default function IncidentDetail() {
                       <select
                         disabled={isClosed}
                         value={incident.status}
-                        onChange={(e) => handleUpdateIncident('status', e.target.value as any)}
+                        onChange={(e) =>
+                          handleUpdateIncident('status', e.target.value as IncidentStatus)
+                        }
                         className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
                       >
                         <option value="OPEN">Open</option>
@@ -288,7 +290,9 @@ export default function IncidentDetail() {
                       <select
                         disabled={isClosed}
                         value={incident.severity}
-                        onChange={(e) => handleUpdateIncident('severity', e.target.value as any)}
+                        onChange={(e) =>
+                          handleUpdateIncident('severity', e.target.value as IncidentSeverity)
+                        }
                         className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
                       >
                         <option value="LOW">Low</option>
