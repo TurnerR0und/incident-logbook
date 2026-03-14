@@ -1,9 +1,10 @@
-import { useCallback, useDeferredValue, useEffect, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
   Check,
   Copy,
+  FilterX,
   LogOut,
   Plus,
   Search,
@@ -32,6 +33,8 @@ const SEVERITY_OPTIONS: IncidentSeverity[] = [
   'MEDIUM',
   'LOW',
 ];
+
+const PAGE_SIZE = 100;
 
 function getSeverityColor(severity: IncidentSeverity) {
   switch (severity) {
@@ -73,12 +76,34 @@ export default function Dashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | ''>('');
   const [severityFilter, setSeverityFilter] = useState<IncidentSeverity | ''>('');
+  const [createdAfter, setCreatedAfter] = useState('');
+  const [createdBefore, setCreatedBefore] = useState('');
   const [ownerSearch, setOwnerSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [copiedIncidentId, setCopiedIncidentId] = useState<string | null>(null);
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
   const isAdmin = currentUser?.is_admin ?? false;
+  const hasInvalidDateRange =
+    createdAfter !== '' && createdBefore !== '' && createdAfter > createdBefore;
+  const hasActiveFilters = Boolean(
+    statusFilter || severityFilter || ownerSearch.trim() || createdAfter || createdBefore,
+  );
+  const filterKey = [
+    statusFilter,
+    severityFilter,
+    createdAfter,
+    createdBefore,
+    deferredOwnerSearch,
+    isAdmin ? 'admin' : 'user',
+  ].join('|');
+  const previousFilterKeyRef = useRef(filterKey);
 
   const fetchIncidents = useCallback(async () => {
+    if (hasInvalidDateRange) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -93,6 +118,14 @@ export default function Dashboard() {
       if (isAdmin && deferredOwnerSearch) {
         params.owner_email = deferredOwnerSearch;
       }
+      if (createdAfter) {
+        params.created_after = `${createdAfter}T00:00:00Z`;
+      }
+      if (createdBefore) {
+        params.created_before = `${createdBefore}T23:59:59.999Z`;
+      }
+      params.skip = (currentPage - 1) * PAGE_SIZE;
+      params.limit = PAGE_SIZE;
 
       const data = await incidentApi.list(params);
       setIncidents(data);
@@ -101,15 +134,44 @@ export default function Dashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [deferredOwnerSearch, isAdmin, severityFilter, statusFilter]);
+  }, [
+    createdAfter,
+    createdBefore,
+    currentPage,
+    deferredOwnerSearch,
+    hasInvalidDateRange,
+    isAdmin,
+    severityFilter,
+    statusFilter,
+  ]);
 
   useEffect(() => {
+    const filtersChanged = previousFilterKeyRef.current !== filterKey;
+
+    if (filtersChanged) {
+      previousFilterKeyRef.current = filterKey;
+
+      if (currentPage !== 1) {
+        setCurrentPage(1);
+        return;
+      }
+    }
+
     fetchIncidents();
-  }, [fetchIncidents]);
+  }, [currentPage, fetchIncidents, filterKey]);
 
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
+  };
+
+  const handleClearFilters = () => {
+    setStatusFilter('');
+    setSeverityFilter('');
+    setCreatedAfter('');
+    setCreatedBefore('');
+    setOwnerSearch('');
+    setCurrentPage(1);
   };
 
   const handleCopyIncidentId = async (
@@ -205,7 +267,7 @@ export default function Dashboard() {
         </section>
 
         <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-4">
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
             <label className="flex flex-col gap-2">
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                 Status
@@ -242,8 +304,32 @@ export default function Dashboard() {
               </select>
             </label>
 
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Created after
+              </span>
+              <input
+                type="date"
+                value={createdAfter}
+                onChange={(event) => setCreatedAfter(event.target.value)}
+                className={`rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 outline-none transition ${hasInvalidDateRange ? 'border-red-300 focus:border-red-500' : 'border-slate-300 focus:border-blue-500'}`}
+              />
+            </label>
+
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Created before
+              </span>
+              <input
+                type="date"
+                value={createdBefore}
+                onChange={(event) => setCreatedBefore(event.target.value)}
+                className={`rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 outline-none transition ${hasInvalidDateRange ? 'border-red-300 focus:border-red-500' : 'border-slate-300 focus:border-blue-500'}`}
+              />
+            </label>
+
             {isAdmin && (
-              <label className="flex flex-col gap-2 lg:col-span-2">
+              <label className="flex flex-col gap-2 xl:col-span-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Search by user
                 </span>
@@ -259,6 +345,24 @@ export default function Dashboard() {
               </label>
             )}
           </div>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className={`text-sm ${hasInvalidDateRange ? 'text-red-600' : 'text-slate-500'}`}>
+              {hasInvalidDateRange
+                ? 'Created after must be on or before created before.'
+                : 'Filters combine across status, severity, owner, and created date.'}
+            </p>
+
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              disabled={!hasActiveFilters}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FilterX className="h-4 w-4" />
+              Clear Filters
+            </button>
+          </div>
         </section>
 
         {isLoading ? (
@@ -267,8 +371,8 @@ export default function Dashboard() {
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm">
             <h3 className="text-base font-semibold text-slate-900">No incidents found</h3>
             <p className="mt-2 text-sm text-slate-500">
-              {isAdmin && deferredOwnerSearch
-                ? 'No incidents match the current owner search and filters.'
+              {hasActiveFilters
+                ? 'No incidents match the current filters.'
                 : 'Try adjusting your filters or report a new incident.'}
             </p>
           </div>

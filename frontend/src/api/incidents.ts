@@ -6,6 +6,10 @@ export interface ListIncidentParams {
   status?: IncidentStatus;
   severity?: IncidentSeverity;
   owner_email?: string;
+  created_after?: string;
+  created_before?: string;
+  skip?: number;
+  limit?: number;
 }
 
 export const incidentApi = {
