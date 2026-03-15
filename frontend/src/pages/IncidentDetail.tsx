@@ -306,18 +306,21 @@ export default function IncidentDetail() {
   const isAdmin = currentUser?.is_admin ?? false;
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6 lg:px-8">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={() => navigate('/dashboard')}
           className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 transition-colors"
         >
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to Dashboard
         </button>
+
+        <div className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${isAdmin ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+          {isAdmin ? 'Admin incident workspace' : 'Incident workspace'}
+        </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
-        {isClosed && (
+      {isClosed && (
           <div className="mb-6 bg-gray-100 border-l-4 border-gray-500 p-4 rounded-md flex items-center shadow-sm">
             <Lock className="h-5 w-5 text-gray-500 mr-2" />
             <p className="text-sm text-gray-700 font-medium">
@@ -675,7 +678,6 @@ export default function IncidentDetail() {
             </div>
           </div>
         </div>
-      </div>
     </div>
   );
 }
