@@ -1,10 +1,6 @@
+import axios from 'axios';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { incidentApi } from '../api/incidents';
-import { commentApi } from '../api/comments';
-import { useAuth } from '../context/AuthContext';
-import type { Incident, IncidentSeverity, IncidentStatus } from '../types/incident';
-import type { Comment } from '../types/comment';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
@@ -14,10 +10,68 @@ import {
   Clock,
   Copy,
   Lock,
+  Pencil,
   Send,
   Shield,
   UserRound,
 } from 'lucide-react';
+import { incidentApi } from '../api/incidents';
+import { commentApi } from '../api/comments';
+import { useAuth } from '../context/AuthContext';
+import type {
+  Incident,
+  IncidentSeverity,
+  IncidentStatus,
+  IncidentUpdate,
+} from '../types/incident';
+import type { Comment } from '../types/comment';
+
+const MIN_ROOT_CAUSE_LENGTH = 30;
+
+const STATUS_OPTIONS: IncidentStatus[] = [
+  'OPEN',
+  'INVESTIGATING',
+  'MITIGATED',
+  'RESOLVED',
+  'CLOSED',
+];
+
+const SEVERITY_OPTIONS: IncidentSeverity[] = [
+  'LOW',
+  'MEDIUM',
+  'HIGH',
+  'CRITICAL',
+];
+
+type IncidentEditForm = {
+  title: string;
+  description: string;
+  status: IncidentStatus;
+  severity: IncidentSeverity;
+  root_cause: string;
+};
+
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  if (axios.isAxiosError<{ detail?: string }>(error)) {
+    return error.response?.data?.detail ?? fallbackMessage;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallbackMessage;
+}
+
+function buildEditForm(incident: Incident): IncidentEditForm {
+  return {
+    title: incident.title,
+    description: incident.description,
+    status: incident.status,
+    severity: incident.severity,
+    root_cause: incident.root_cause ?? '',
+  };
+}
 
 export default function IncidentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,14 +84,14 @@ export default function IncidentDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  // RESTORED: Inline Closing State instead of Modal
   const [isClosingMode, setIsClosingMode] = useState(false);
   const [rootCauseInput, setRootCauseInput] = useState('');
   const [isClosing, setIsClosing] = useState(false);
-  const MIN_ROOT_CAUSE_LENGTH = 30;
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editForm, setEditForm] = useState<IncidentEditForm | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
-  // RESTORED: Auto-scroll ref
   const commentsEndRef = useRef<HTMLDivElement>(null);
 
   const fetchData = useCallback(async () => {
@@ -63,7 +117,6 @@ export default function IncidentDetail() {
     fetchData();
   }, [fetchData]);
 
-  // RESTORED: Auto-scroll to bottom of comments when they change
   useEffect(() => {
     commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [comments]);
@@ -76,6 +129,9 @@ export default function IncidentDetail() {
     if (incident[field] === value) return;
 
     if (field === 'status' && value === 'CLOSED') {
+      setIsEditMode(false);
+      setEditForm(null);
+      setEditError(null);
       setIsClosingMode(true);
       return;
     }
@@ -89,16 +145,114 @@ export default function IncidentDetail() {
     }
   };
 
-  // RESTORED: Inline closing logic
+  const handleStartEditMode = () => {
+    if (!incident || incident.status === 'CLOSED') return;
+
+    setIsClosingMode(false);
+    setRootCauseInput('');
+    setEditError(null);
+    setEditForm(buildEditForm(incident));
+    setIsEditMode(true);
+  };
+
+  const handleCancelEditMode = () => {
+    setIsEditMode(false);
+    setEditForm(null);
+    setEditError(null);
+  };
+
+  const handleEditFieldChange = <TField extends keyof IncidentEditForm>(
+    field: TField,
+    value: IncidentEditForm[TField],
+  ) => {
+    setEditForm((currentForm) =>
+      currentForm
+        ? {
+            ...currentForm,
+            [field]: value,
+          }
+        : currentForm,
+    );
+  };
+
+  const handleSaveEdits = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!id || !incident || !editForm) return;
+
+    const nextTitle = editForm.title.trim();
+    const nextDescription = editForm.description.trim();
+    const nextRootCause = editForm.root_cause.trim();
+    const normalizedRootCause = nextRootCause || null;
+
+    if (!nextTitle || !nextDescription) {
+      setEditError('Title and description are required.');
+      return;
+    }
+
+    const isClosingFromEdit =
+      editForm.status === 'CLOSED' && incident.status !== 'CLOSED';
+
+    if (isClosingFromEdit && (!normalizedRootCause || normalizedRootCause.length < MIN_ROOT_CAUSE_LENGTH)) {
+      setEditError(`A root cause of at least ${MIN_ROOT_CAUSE_LENGTH} characters is required to close the incident.`);
+      return;
+    }
+
+    const payload: IncidentUpdate = {};
+
+    if (nextTitle !== incident.title) {
+      payload.title = nextTitle;
+    }
+
+    if (nextDescription !== incident.description) {
+      payload.description = nextDescription;
+    }
+
+    if (editForm.status !== incident.status) {
+      payload.status = editForm.status;
+    }
+
+    if (editForm.severity !== incident.severity) {
+      payload.severity = editForm.severity;
+    }
+
+    if (normalizedRootCause !== (incident.root_cause ?? null)) {
+      payload.root_cause = normalizedRootCause;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      handleCancelEditMode();
+      return;
+    }
+
+    setEditError(null);
+    setIsSavingEdit(true);
+
+    try {
+      if (isClosingFromEdit && normalizedRootCause) {
+        await commentApi.create(id, { body: `Root Cause: ${normalizedRootCause}` });
+      }
+
+      await incidentApi.update(id, payload);
+      await fetchData();
+      handleCancelEditMode();
+    } catch (error) {
+      console.error('Failed to save incident edits:', error);
+      setEditError(getErrorMessage(error, 'Failed to save incident edits'));
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const handleConfirmClose = async () => {
     if (!id || rootCauseInput.length < MIN_ROOT_CAUSE_LENGTH) return;
 
     setIsClosing(true);
     try {
       await commentApi.create(id, { body: `Root Cause: ${rootCauseInput}` });
-      await incidentApi.update(id, { 
+      await incidentApi.update(id, {
         status: 'CLOSED',
-        root_cause: rootCauseInput 
+        root_cause: rootCauseInput,
       });
 
       setIsClosingMode(false);
@@ -112,8 +266,8 @@ export default function IncidentDetail() {
     }
   };
 
-  const handlePostComment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePostComment = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!id || !newComment.trim()) return;
 
     setIsSubmitting(true);
@@ -181,21 +335,134 @@ export default function IncidentDetail() {
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${isAdmin ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'}`}>
                       {isAdmin ? 'Admin context' : 'Incident detail'}
                     </span>
+                    {isEditMode && (
+                      <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                        Edit mode
+                      </span>
+                    )}
                   </div>
                   <h1 className="text-2xl font-bold text-gray-900">{incident.title}</h1>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopyId}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:border-gray-400"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copied' : 'Copy ID'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleStartEditMode}
+                    disabled={isClosed || isEditMode}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit Incident
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyId}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:border-gray-400"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? 'Copied' : 'Copy ID'}
+                  </button>
+                </div>
               </div>
 
-              <p className="text-gray-600 mb-6 whitespace-pre-wrap">{incident.description}</p>
+              {isEditMode && editForm ? (
+                <form onSubmit={handleSaveEdits} className="mb-6 space-y-4 rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <input
+                      type="text"
+                      value={editForm.title}
+                      onChange={(event) => handleEditFieldChange('title', event.target.value)}
+                      className="block w-full rounded-md border border-blue-200 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea
+                      rows={4}
+                      value={editForm.description}
+                      onChange={(event) => handleEditFieldChange('description', event.target.value)}
+                      className="block w-full rounded-md border border-blue-200 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <select
+                        value={editForm.status}
+                        onChange={(event) => handleEditFieldChange('status', event.target.value as IncidentStatus)}
+                        className="block w-full rounded-md border border-blue-200 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                      >
+                        {STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+                      <select
+                        value={editForm.severity}
+                        onChange={(event) => handleEditFieldChange('severity', event.target.value as IncidentSeverity)}
+                        className="block w-full rounded-md border border-blue-200 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                      >
+                        {SEVERITY_OPTIONS.map((severity) => (
+                          <option key={severity} value={severity}>
+                            {severity}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-4 mb-1">
+                      <label className="block text-sm font-medium text-gray-700">Root Cause</label>
+                      <span className="text-xs text-gray-500">
+                        {editForm.status === 'CLOSED'
+                          ? `${editForm.root_cause.trim().length}/${MIN_ROOT_CAUSE_LENGTH} min chars to close`
+                          : 'Optional unless closing'}
+                      </span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={editForm.root_cause}
+                      onChange={(event) => handleEditFieldChange('root_cause', event.target.value)}
+                      placeholder="Capture confirmed root cause details"
+                      className="block w-full rounded-md border border-blue-200 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {editError && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {editError}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCancelEditMode}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingEdit}
+                      className="rounded-md border border-transparent bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isSavingEdit ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="text-gray-600 mb-6 whitespace-pre-wrap">{incident.description}</p>
+              )}
 
               <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
                 <div className="flex items-center justify-between gap-4">
@@ -224,7 +491,6 @@ export default function IncidentDetail() {
               </div>
 
               <div className="space-y-4">
-                {/* RESTORED: Inline Closing Controls */}
                 {isClosingMode ? (
                   <div className="bg-blue-50 p-4 rounded-md border border-blue-100">
                     <h3 className="text-sm font-medium text-blue-900 mb-2 flex items-center">
@@ -237,7 +503,7 @@ export default function IncidentDetail() {
                     <textarea
                       rows={4}
                       value={rootCauseInput}
-                      onChange={(e) => setRootCauseInput(e.target.value)}
+                      onChange={(event) => setRootCauseInput(event.target.value)}
                       placeholder="e.g., A memory leak in v2.4 caused the event loop to block..."
                       className="w-full border border-blue-200 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm mb-3"
                     />
@@ -265,23 +531,23 @@ export default function IncidentDetail() {
                       </div>
                     </div>
                   </div>
-                ) : (
+                ) : !isEditMode ? (
                   <>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                       <select
                         disabled={isClosed}
                         value={incident.status}
-                        onChange={(e) =>
-                          handleUpdateIncident('status', e.target.value as IncidentStatus)
+                        onChange={(event) =>
+                          handleUpdateIncident('status', event.target.value as IncidentStatus)
                         }
                         className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
                       >
-                        <option value="OPEN">Open</option>
-                        <option value="INVESTIGATING">Investigating</option>
-                        <option value="MITIGATED">Mitigated</option>
-                        <option value="RESOLVED">Resolved</option>
-                        <option value="CLOSED">Closed</option>
+                        {STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
                       </select>
                     </div>
 
@@ -290,21 +556,22 @@ export default function IncidentDetail() {
                       <select
                         disabled={isClosed}
                         value={incident.severity}
-                        onChange={(e) =>
-                          handleUpdateIncident('severity', e.target.value as IncidentSeverity)
+                        onChange={(event) =>
+                          handleUpdateIncident('severity', event.target.value as IncidentSeverity)
                         }
                         className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
                       >
-                        <option value="LOW">Low</option>
-                        <option value="MEDIUM">Medium</option>
-                        <option value="HIGH">High</option>
-                        <option value="CRITICAL">Critical</option>
+                        {SEVERITY_OPTIONS.map((severity) => (
+                          <option key={severity} value={severity}>
+                            {severity}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </>
-                )}
+                ) : null}
 
-                {isClosed && incident.root_cause && (
+                {incident.root_cause && !isEditMode && (
                   <div className="mt-4 bg-gray-50 p-3 rounded-md border border-gray-200">
                     <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Root Cause</h4>
                     <p className="text-sm text-gray-600 whitespace-pre-wrap">{incident.root_cause}</p>
@@ -382,7 +649,6 @@ export default function IncidentDetail() {
                     );
                   })
                 )}
-                {/* RESTORED: The invisible anchor element */}
                 <div ref={commentsEndRef} />
               </div>
 
@@ -392,7 +658,7 @@ export default function IncidentDetail() {
                     type="text"
                     disabled={isClosed}
                     value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
+                    onChange={(event) => setNewComment(event.target.value)}
                     placeholder={isClosed ? 'Incident closed. Comments disabled.' : 'Add a note to the timeline...'}
                     className="flex-1 min-w-0 block w-full px-3 py-2 rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                   />

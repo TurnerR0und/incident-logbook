@@ -84,6 +84,58 @@ async def test_updating_closed_incident_returns_400(client, auth_headers):
     assert response.json()["detail"] == "This incident is CLOSED and cannot be modified."
 
 
+async def test_update_creates_system_comments_for_full_incident_edits(client, auth_headers):
+    headers = await auth_headers("editor@example.com")
+
+    create_response = await client.post(
+        "/incidents",
+        json={
+            "title": "Checkout latency",
+            "description": "p95 latency exceeded target",
+            "severity": "HIGH",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    incident_id = create_response.json()["id"]
+
+    update_response = await client.patch(
+        f"/incidents/{incident_id}",
+        json={
+            "title": "Checkout latency spike",
+            "description": "p95 latency exceeded target for the checkout API",
+            "severity": "CRITICAL",
+            "status": "INVESTIGATING",
+            "root_cause": "Connection pool starvation during failover",
+        },
+        headers=headers,
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["title"] == "Checkout latency spike"
+    assert payload["description"] == "p95 latency exceeded target for the checkout API"
+    assert payload["severity"] == "CRITICAL"
+    assert payload["status"] == "INVESTIGATING"
+    assert payload["root_cause"] == "Connection pool starvation during failover"
+
+    comments_response = await client.get(
+        f"/incidents/{incident_id}/comments",
+        headers=headers,
+    )
+
+    assert comments_response.status_code == 200
+    bodies = [comment["body"] for comment in comments_response.json()]
+    assert "System: Status changed from OPEN to INVESTIGATING by editor@example.com" in bodies
+    assert "System: Severity changed from HIGH to CRITICAL by editor@example.com" in bodies
+    assert (
+        'System: Title updated from "Checkout latency" to "Checkout latency spike" by editor@example.com'
+        in bodies
+    )
+    assert "System: Description updated by editor@example.com" in bodies
+    assert "System: Root cause updated by editor@example.com" in bodies
+
+
 async def test_created_after_filters_incidents_by_timeframe(
     client,
     create_user,

@@ -220,6 +220,39 @@ async def update_incident(
             )
         )
 
+    new_title = update_data.get("title")
+    if new_title is not None and new_title != incident.title:
+        system_comments.append(
+            IncidentComment(
+                incident_id=incident.id,
+                author_id=current_user.id,
+                body=(
+                    'System: Title updated from '
+                    f'"{incident.title}" to "{new_title}" by {current_user.email}'
+                ),
+            )
+        )
+
+    new_description = update_data.get("description")
+    if new_description is not None and new_description != incident.description:
+        system_comments.append(
+            IncidentComment(
+                incident_id=incident.id,
+                author_id=current_user.id,
+                body=f"System: Description updated by {current_user.email}",
+            )
+        )
+
+    new_root_cause = update_data.get("root_cause")
+    if new_root_cause is not None and new_root_cause != incident.root_cause:
+        system_comments.append(
+            IncidentComment(
+                incident_id=incident.id,
+                author_id=current_user.id,
+                body=f"System: Root cause updated by {current_user.email}",
+            )
+        )
+
     if (
         update_data.get("status") == IncidentStatus.RESOLVED
         and incident.status != IncidentStatus.RESOLVED
